@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"encoding/json"
 	"github.com/ybazli/auth-service/src/utils"
 	"net/http"
 	"time"
@@ -64,11 +65,20 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	sessionData := models.Session{
+		UserID:       user.ID,
+		RefreshToken: tokens.RefreshToken,
+		UserAgent:    c.Request.UserAgent(),
+		IP:           c.ClientIP(),
+		CreatedAt:    time.Now().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(sessionData)
+
 	// store refresh token in redis
 	err = config.RedisClient.Set(
 		config.Ctx,
-		"session:"+tokens.SessionID,
-		tokens.RefreshToken,
+		utils.SessionKey(tokens.SessionID),
+		data,
 		7*24*time.Hour,
 	).Err()
 
@@ -81,5 +91,61 @@ func Login(c *gin.Context) {
 		"access_token":  tokens.AccessToken,
 		"refresh_token": tokens.RefreshToken,
 		"session_id":    tokens.SessionID,
+	})
+}
+
+func RefreshToken(c *gin.Context) {
+	type RefreshToken struct {
+		SessionID    string `json:"session_id" binding:"required"`
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+
+	var input RefreshToken
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	sessionData, err := config.RedisClient.Get(config.Ctx, utils.SessionKey(input.SessionID)).Result()
+	var session models.Session
+	err = json.Unmarshal([]byte(sessionData), &session)
+
+	if err != nil {
+		utils.Error(c, http.StatusUnauthorized, "Session not found or expired")
+		return
+	}
+
+	if session.RefreshToken != input.RefreshToken {
+		utils.Error(c, http.StatusUnauthorized, "Invalid refresh token")
+		return
+	}
+	var user models.User
+	if err := config.DB.First(&user, session.UserID).Error; err != nil {
+		utils.Error(c, http.StatusUnauthorized, "User not found.")
+	}
+
+	newTokens, err := utils.GenerateTokenPair(user)
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "Failed to generate token.")
+		return
+	}
+	newSession := models.Session{
+		UserID:       user.ID,
+		RefreshToken: newTokens.RefreshToken,
+		UserAgent:    c.Request.UserAgent(),
+		IP:           c.ClientIP(),
+		CreatedAt:    time.Now().Format(time.RFC3339),
+	}
+
+	newSessionData, _ := json.Marshal(newSession)
+	config.RedisClient.Del(config.Ctx, utils.SessionKey(input.SessionID))
+
+	config.RedisClient.Set(config.Ctx, utils.SessionKey(newTokens.SessionID), newSessionData, 7*24*time.Hour)
+
+	utils.Success(c, gin.H{
+		"access_token":  newTokens.AccessToken,
+		"refresh_token": newTokens.RefreshToken,
+		"session_id":    newTokens.SessionID,
 	})
 }
