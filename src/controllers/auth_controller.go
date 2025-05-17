@@ -75,15 +75,11 @@ func Login(c *gin.Context) {
 	data, _ := json.Marshal(sessionData)
 
 	// store refresh token in redis
-	err = config.RedisClient.Set(
-		config.Ctx,
-		utils.SessionKey(tokens.SessionID),
-		data,
-		7*24*time.Hour,
-	).Err()
+	err = config.RedisClient.HSet(config.Ctx, utils.SessionKey(tokens.SessionID), "sessions", data).Err()
+	err = config.RedisClient.Expire(config.Ctx, utils.SessionKey(tokens.SessionID), 7*24*time.Hour).Err()
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store session"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store session. Redis Error: " + err.Error()})
 		return
 	}
 
@@ -141,7 +137,8 @@ func RefreshToken(c *gin.Context) {
 	newSessionData, _ := json.Marshal(newSession)
 	config.RedisClient.Del(config.Ctx, utils.SessionKey(input.SessionID))
 
-	config.RedisClient.Set(config.Ctx, utils.SessionKey(newTokens.SessionID), newSessionData, 7*24*time.Hour)
+	err = config.RedisClient.HSet(config.Ctx, utils.SessionKey(newTokens.SessionID), "sessions", newSessionData).Err()
+	err = config.RedisClient.Expire(config.Ctx, utils.SessionKey(newTokens.SessionID), 7*24*time.Hour).Err()
 
 	utils.Success(c, gin.H{
 		"access_token":  newTokens.AccessToken,

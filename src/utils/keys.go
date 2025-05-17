@@ -3,7 +3,7 @@ package utils
 import "fmt"
 
 func SessionKey(sessionID string) string {
-	return "session:" + sessionID
+	return sessionID
 }
 
 func UserSessionsKey(userID uint) string {
