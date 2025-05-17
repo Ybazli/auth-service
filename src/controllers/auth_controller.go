@@ -103,7 +103,7 @@ func RefreshToken(c *gin.Context) {
 		return
 	}
 
-	sessionData, err := config.RedisClient.Get(config.Ctx, utils.SessionKey(input.SessionID)).Result()
+	sessionData, err := config.RedisClient.HGet(config.Ctx, "sessions", utils.SessionKey(input.SessionID)).Result()
 	var session models.Session
 	err = json.Unmarshal([]byte(sessionData), &session)
 
