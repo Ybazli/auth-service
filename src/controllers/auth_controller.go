@@ -146,3 +146,29 @@ func RefreshToken(c *gin.Context) {
 		"session_id":    newTokens.SessionID,
 	})
 }
+
+func Logout(c *gin.Context) {
+	type Logout struct {
+		SessionID string `json:"session_id" binding:"required"`
+	}
+
+	var input Logout
+	if err := c.ShouldBindJSON(&input); err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	_, err := config.RedisClient.HGet(config.Ctx, "sessions", utils.SessionKey(input.SessionID)).Result()
+
+	if err != nil {
+		utils.Error(c, http.StatusUnauthorized, "Session not found")
+		return
+	}
+
+	err = config.RedisClient.Del(config.Ctx, input.SessionID).Err()
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "Failed to logout")
+		return
+	}
+
+	utils.Success(c, gin.H{"message": "Logged out successfully"})
+}
